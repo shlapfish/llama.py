@@ -1,28 +1,24 @@
-from collections import defaultdict, namedtuple
 from dataclasses import dataclass, field
 from itertools import count
 from typing import Any, ClassVar, Iterable
 
-from src.bindings import lib, c_str, ffi, load_libllama, initialize_backend, copy_array
+import numpy as np
+
+from src.bindings import lib, ffi, copy_array
 from src.model import Model
 
 
 @dataclass(slots=True)
 class Logits:
     _raw: Any
-    _len: int
 
-    def get(self) -> list[float]:
+    def get(self) -> np.ndarray[np.float32]:
         self._check()
-        return list(self._raw[0:self._len])
+        return np.frombuffer(ffi.buffer(self._raw), dtype=np.float32)
 
     def _check(self):
         if self._raw is None:
             raise Exception("You have to run context.process() first to fill in the logits.")
-
-    def __len__(self):
-        self._check()
-        return self._len
 
 
 @dataclass(slots=True, frozen=True)
@@ -152,7 +148,7 @@ class Sequence:
         """
         match text_or_tokens:
             case int(token):
-                ret = Logits(None, self.context.model.vocab_size) if generate_logits else None
+                ret = Logits(None) if generate_logits else None
                 self.context.planned_inserts.append(Insert(
                     seq_id=self.seq_id,
                     pos=len(self.tokens),
