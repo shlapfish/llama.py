@@ -118,8 +118,10 @@ class Model:
         return lib.llama_n_embd(self._raw)
 
     def __getattribute__(self, item):
-        assert object.__getattribute__(self, "_raw") is not None, "Cannot use model after free."
-        return object.__getattribute__(self, item)
+        if item == "_raw" or self._raw is not None:
+            return object.__getattribute__(self, item)
+        else:
+            raise Exception("Cannot use model after free.")
 
     def __enter__(self):
         return self

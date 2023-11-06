@@ -43,8 +43,6 @@ class Context:
     - embedding: `bool` --- Embedding mode only.
     """
     def __init__(self, model: Model, **kwargs):
-        self.planned_inserts: dict[Sequence, list[tuple[int, Logits | None]]] = defaultdict(list)
-        """Sequence -> [(token, Logits|None), ...]"""
         self.planned_inserts: list[Insert] = []
         self.model = model  # we need to keep this alive
         params = lib.llama_context_default_params()
@@ -59,12 +57,12 @@ class Context:
     def process(self):
         """Process all the pending insert jobs."""
         while self.planned_inserts:
-            batch = self.planned_inserts[:self.max_batch_size]
+            inserts = self.planned_inserts[:self.max_batch_size]
             n_seq_max = 1
-            batch = lib.llama_batch_init(len(batch), 0, n_seq_max)
-            batch.n_tokens = len(batch)
+            batch = lib.llama_batch_init(len(inserts), 0, n_seq_max)
+            batch.n_tokens = len(inserts)
             n_vocab = self.model.vocab_size
-            for i, insert in enumerate(batch):
+            for i, insert in enumerate(inserts):
                 batch.token[i] = insert.token
                 batch.pos[i] = insert.pos
                 batch.n_seq_id[i] = 1
@@ -75,8 +73,8 @@ class Context:
             try:
                 if result == 1: raise Exception("Could not find a KV slot for the batch (try reducing the size of the batch or increase the context)")
                 if result > 1: raise Exception("Unknown error while processing a batch.")
-                self.planned_inserts = self.planned_inserts[len(batch):]
-                for i, insert in enumerate(batch):
+                self.planned_inserts = self.planned_inserts[len(inserts):]
+                for i, insert in enumerate(inserts):
                     if insert.logits is not None:
                         insert.logits._raw = copy_array(lib.llama_get_logits_ith(self._raw, i), n_vocab, "float")
             finally:
@@ -87,8 +85,10 @@ class Context:
         return lib.llama_n_ctx(self._raw)
 
     def __getattribute__(self, item):
-        assert object.__getattribute__(self, "_raw") is not None, "Cannot use context after free."
-        return object.__getattribute__(self, item)
+        if item == "_raw" or self._raw is not None:
+            return object.__getattribute__(self, item)
+        else:
+            raise Exception("Cannot use context after free.")
 
     def __enter__(self):
         return self
@@ -98,8 +98,6 @@ class Context:
 
     def free(self):
         """Unloads the context, making it unusable."""
-        for l in self.active_logits:
-            l._raw = None
         lib.llama_free(self._raw)
         self._raw = None
 
@@ -161,6 +159,7 @@ class Sequence:
                     token=token,
                     logits=ret
                 ))
+                self.tokens.append(token)
                 return ret
             case str(text):
                 return self.insert(self.context.model.tokenize(text), generate_logits)

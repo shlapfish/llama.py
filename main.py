@@ -2,14 +2,13 @@ from src.bindings import free_backend
 from src.llama import Model, Context, Sequence, lib, load_libllama, initialize_backend
 import numpy as np
 
-load_libllama("/your/github/clone/of/llama.cpp")
+load_libllama("../llama.cpp")
 initialize_backend(numa=False)
-model = Model(path="/your/model.gguf",
-              n_gpu_layers=0)
+model = Model(path="models/Nous-Hermes-13B.Q4_K_M.gguf", n_gpu_layers=0)
 
-context = Context(model, n_ctx=2048, n_batch=16)
+context = Context(model, n_ctx=512, n_batch=16)
 
-txt = model.bos + "What are the different types of footwear?" + model.nl
+txt = f"{model.bos}### Instruction:{model.nl}List the different types of footwear.{model.nl}### Response:{model.nl}"
 assert txt == model.detokenize(model.tokenize(txt))
 
 print(txt, end="")
