@@ -27,10 +27,11 @@ class Story:
         if toks[-1] == self.model.token_newline:
             toks.pop()
         if self.model.token_newline in toks:
-            amount_to_truncate = list(reversed(toks)).index(self.model.token_newline)
+            amount_to_truncate = 1 + list(reversed(toks)).index(self.model.token_newline)
+            self.sequence.truncate_end(amount_to_truncate)
+            self.last_logits = self.insert_text("\n")
         else:
-            amount_to_truncate = len(toks) - 1
-        self.sequence.truncate_end(amount_to_truncate)
+            self.clear()
 
     def write_paragraph(self, max_len=128) -> Iterator[str]:
         """
