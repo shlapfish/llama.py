@@ -33,7 +33,7 @@ class Story:
         else:
             self.clear()
 
-    def write_paragraph(self, max_len=128) -> Iterator[str]:
+    def write_paragraph(self, max_len=256) -> Iterator[str]:
         """
         Generates a paragraph (excluding the newline).
         :param max_len: The maximum length of the paragraph in tokens.
@@ -41,7 +41,7 @@ class Story:
         for _ in range(max_len):
             new_token = self.sampler.sample(self.last_logits)
             yield self.model.detokenize(new_token)
-            if new_token == self.model.token_newline:
+            if new_token in (self.model.token_newline, self.model.token_eos):
                 return
             self.last_logits = self.sequence.insert(new_token)
             self.context.process()
@@ -133,7 +133,10 @@ class WriterShell(cmd.Cmd):
 
     def do_pick(self, arg):
         'pick [n]: pick the n-th option and write it into the story'
-        self.do_write(self.current_options[int(arg) - 1])
+        try:
+            self.do_write(self.current_options[int(arg) - 1])
+        except IndexError:
+            print("No such option.")
 
     def do_undo(self, arg):
         'removes last paragraph'
@@ -149,7 +152,7 @@ class WriterShell(cmd.Cmd):
             self.do_par(num)
 
     def do_print(self, arg):
-        print(story.sequence)
+        print(str(story.sequence).replace("\n", "\n\n"))
 
     def do_exit(self, arg):
         exit()
