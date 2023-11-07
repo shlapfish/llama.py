@@ -1,6 +1,6 @@
 from typing import Iterable
 
-from src.bindings import c_str, lib, ffi
+from src.bindings import c_str, lib, ffi, UseAfterFree
 
 
 class Model:
@@ -23,44 +23,23 @@ class Model:
         self.token_bos: int = lib.llama_token_bos(self._raw)
         """Beginning of sequence token."""
 
-        self.bos: str = self.detokenize([lib.llama_token_bos(self._raw)])
-        """Beginning of sequence control string."""
-
         self.token_eos: int = lib.llama_token_eos(self._raw)
         """End of sequence token."""
 
-        self.eos: str = self.detokenize([self.token_eos])
-        """End of sequence control string."""
-
-        self.token_nl: int = lib.llama_token_nl(self._raw)
+        self.token_newline: int = lib.llama_token_nl(self._raw)
         """Newline token."""
-
-        self.nl: str = self.detokenize([self.token_nl])
-        """Newline control string."""
 
         self.token_prefix: int = lib.llama_token_prefix(self._raw)
         """Beginning of infill prefix (codellama)."""
 
-        self.prefix: str = self.detokenize([self.token_prefix])
-        """Beginning of infill prefix control string (codellama)."""
-
         self.token_middle: int = lib.llama_token_middle(self._raw)
         """Beginning of infill middle (codellama)."""
-
-        self.middle: str = self.detokenize([self.token_middle])
-        """Beginning of infill control string (codellama)."""
 
         self.token_suffix: int = lib.llama_token_suffix(self._raw)
         """Beginning of infill suffix (codellama)."""
 
-        self.suffix: str = self.detokenize([self.token_suffix])
-        """Beginning of infill suffic control string (codellama)."""
-
         self.token_eot: int = lib.llama_token_eot(self._raw)
         """End of infill middle (codellama)."""
-
-        self.eot: str = self.detokenize([self.token_eot])
-        """End of infill middle control string (codellama)."""
 
     def tokenize(self, text: str, tokenize_specials=True) -> list[int]:
         """
@@ -117,12 +96,6 @@ class Model:
     def embedding_size(self) -> int:
         return lib.llama_n_embd(self._raw)
 
-    def __getattribute__(self, item):
-        if item == "_raw" or self._raw is not None:
-            return object.__getattribute__(self, item)
-        else:
-            raise Exception("Cannot use model after free.")
-
     def __enter__(self):
         return self
 
@@ -133,7 +106,12 @@ class Model:
         """Unloads the model, making it unusable."""
         lib.llama_free_model(self._raw)
         self._raw = None
+        def err(_): raise UseAfterFree("Cannot use model after free.")
+        self.__getattribute__ = err
 
     def __del__(self):
-        if self._raw is not None:
-            self.free()
+        try:
+            if hasattr(self, "_raw"):
+                self.free()
+        except UseAfterFree:
+            pass

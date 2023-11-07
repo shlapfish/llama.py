@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Iterable
 
 import numpy as np
 
-from src.bindings import lib, ffi, copy_array
+from src.bindings import lib, ffi, copy_array, UseAfterFree
 from src.model import Model
 
 
@@ -32,23 +32,28 @@ class Insert:
 class Context:
     """
     - seed: `int` --- RNG seed, -1 for random.
-    - n_ctx: `int` --- Size of the context window in tokens.
+    - context_size: `int` --- Size of the context window in tokens. Default = take from model.
     - n_batch: `int` --- Prompt processing maximum batch size.
-    - n_threads: `int` --- Number of threads to use for generation.
-    - n_threads_batch: `int` --- Number of threads to use for batch processing.
+    - threads: `int` --- Number of threads to used.
     - embedding: `bool` --- Embedding mode only.
     """
-    def __init__(self, model: Model, **kwargs):
+    def __init__(self, model: Model, context_size=None, threads=None, **kwargs):
         self.planned_inserts: list[Insert] = []
         self.model = model  # we need to keep this alive
         params = lib.llama_context_default_params()
+
+        params.n_ctx = context_size if context_size else 0
         for k, v in kwargs.items():
+            if k not in dir(params):
+                raise ValueError(f"There is no parameter {k}.")
             setattr(params, k, v)
 
         self.max_batch_size = params.n_batch
         self._raw = lib.llama_new_context_with_model(model._raw, params)
         if self._raw == ffi.NULL:
             raise Exception("Could not create new context.")
+        if threads:
+            lib.llama_set_n_threads(self._raw, threads, threads)
 
     def process(self):
         """Process all the pending insert jobs."""
@@ -80,12 +85,6 @@ class Context:
         """The amount of tokens that can fit in the context window."""
         return lib.llama_n_ctx(self._raw)
 
-    def __getattribute__(self, item):
-        if item == "_raw" or self._raw is not None:
-            return object.__getattribute__(self, item)
-        else:
-            raise Exception("Cannot use context after free.")
-
     def __enter__(self):
         return self
 
@@ -96,10 +95,15 @@ class Context:
         """Unloads the context, making it unusable."""
         lib.llama_free(self._raw)
         self._raw = None
+        def err(_): raise UseAfterFree("Cannot use context after free.")
+        self.__getattribute__ = err
 
     def __del__(self):
-        if self._raw is not None:
-            self.free()
+        try:
+            if hasattr(self, "_raw"):
+                self.free()
+        except UseAfterFree:
+            pass
 
 
 @dataclass
@@ -141,7 +145,7 @@ class Sequence:
         lib.llama_kv_cache_seq_rm(self.context._raw, self.seq_id, 0, -1)
         self.tokens.clear()
 
-    def insert(self, text_or_tokens: str | int | Iterable[int], generate_logits: bool = False) -> Logits | None:
+    def insert(self, text_or_tokens: str | int | Iterable[int], generate_logits: bool = True) -> Logits | None:
         """
         Schedules token inserts and possibly returns logits for the last token. Initially the logits object will be empty.
         Run context.process() to execute all planned inserts, which will fill it in.
@@ -177,3 +181,6 @@ class Sequence:
 
     def __str__(self):
         return self.context.model.detokenize(self.tokens)
+
+    def __len__(self):
+        return len(self.tokens)

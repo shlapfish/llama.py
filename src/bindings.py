@@ -67,3 +67,7 @@ def copy_array(src, length, type_str):
     size = ffi.sizeof(type_str)
     ffi.memmove(ret, src, size * length)
     return ret
+
+
+class UseAfterFree(Exception):
+    pass
