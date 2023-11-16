@@ -95,12 +95,10 @@ class Context:
         """Unloads the context, making it unusable."""
         lib.llama_free(self._raw)
         self._raw = None
-        def err(_): raise UseAfterFree("Cannot use context after free.")
-        self.__getattribute__ = err
 
     def __del__(self):
         try:
-            if hasattr(self, "_raw"):
+            if self._raw is not None:
                 self.free()
         except UseAfterFree:
             pass
@@ -112,6 +110,7 @@ class Sequence:
     seq_id: int = field(hash=True)
     tokens: list[int]
     used_ids: ClassVar = set()
+    original_length: int = 0  # so that clear() doesn't remove the parent
 
     def __init__(self, context: Context):
         self.context = context
@@ -130,7 +129,7 @@ class Sequence:
     def truncate_end(self, amount: int):
         """Remove the last `amount` tokens from the sequence."""
         l = len(self.tokens)
-        assert amount <= l
+        assert amount <= l - self.original_length, f"Can truncate at most {l - self.original_length}."
         lib.llama_kv_cache_seq_rm(self.context._raw, self.seq_id, l - amount, -1)
         self.tokens = self.tokens[:l - amount]
 
@@ -139,11 +138,11 @@ class Sequence:
         new_seq = Sequence(self.context)
         lib.llama_kv_cache_seq_cp(self.context._raw, self.seq_id, new_seq.seq_id, 0, len(self.tokens))
         new_seq.tokens = self.tokens
+        new_seq.original_length = len(self.tokens)
         return new_seq
 
     def clear(self):
-        lib.llama_kv_cache_seq_rm(self.context._raw, self.seq_id, 0, -1)
-        self.tokens.clear()
+        self.truncate_end(len(self.tokens) - self.original_length)
 
     def insert(self, text_or_tokens: str | int | Iterable[int], generate_logits: bool = True) -> Logits | None:
         """
@@ -174,7 +173,15 @@ class Sequence:
                 raise ValueError("Unsupported type.")
 
     def __del__(self):
+        if self.tokens:
+            raise Exception("You have to clear your sequences to clean up kv cache space.")
         self.used_ids.remove(self.seq_id)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clear()
 
     def __hash__(self):
         return self.seq_id

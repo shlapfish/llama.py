@@ -62,7 +62,9 @@ class Model:
         result = []
         for token in tokens:
             n_chars = lib.llama_token_to_piece(self._raw, token, buf, len(buf))
-            result.append(ffi.string(buf, n_chars).decode())
+            try:
+                result.append(ffi.string(buf, n_chars).decode())
+            except UnicodeDecodeError: pass
         return "".join(result)
 
     @property
@@ -104,14 +106,13 @@ class Model:
 
     def free(self):
         """Unloads the model, making it unusable."""
-        lib.llama_free_model(self._raw)
+        if self._raw is not None:
+            lib.llama_free_model(self._raw)
         self._raw = None
-        def err(_): raise UseAfterFree("Cannot use model after free.")
-        self.__getattribute__ = err
 
     def __del__(self):
         try:
-            if hasattr(self, "_raw"):
+            if self._raw is not None:
                 self.free()
         except UseAfterFree:
             pass

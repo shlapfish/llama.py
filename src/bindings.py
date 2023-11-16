@@ -43,7 +43,7 @@ def load_libllama(path: str):
 backend_initialized = False
 
 
-def initialize_backend(numa: bool = False):
+def initialize_backend(*, numa: bool = False):
     global backend_initialized
     if backend_initialized:
         raise Exception("The backend is already initialized.")
