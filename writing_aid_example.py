@@ -1,5 +1,8 @@
 import cmd
+from collections import namedtuple
 from contextlib import contextmanager
+from copy import copy
+from types import SimpleNamespace
 from typing import Iterator
 
 from llama import Model, Context, Mirostatv2Sampler, initialize_backend
@@ -12,10 +15,11 @@ initialize_backend(numa=False)
 
 class Story:
     def __init__(self):
-        self.model = Model("models/nous-hermes-llama2-13b.Q4_0.gguf", n_gpu_layers=1000)
-        self.context = Context(self.model)
+        self.model = Model("models/Nous-Hermes-13B.Q5_K_M.gguf", n_gpu_layers=1000)
+        self.context = Context(self.model, context_size=10000, )
         self.sampler = Mirostatv2Sampler(self.context)
         self.sequence = Sequence(self.context)
+        self.last_logits = self.sequence.insert(self.model.token_bos)
         self.clear()
 
     def insert_text(self, text: str):
@@ -29,22 +33,35 @@ class Story:
         if self.model.token_newline in toks:
             amount_to_truncate = 1 + list(reversed(toks)).index(self.model.token_newline)
             self.sequence.truncate_end(amount_to_truncate)
-            self.last_logits = self.insert_text("\n")
+            self.insert_text("\n")
         else:
             self.clear()
 
-    def write_paragraph(self, max_len=256) -> Iterator[str]:
+    def generate_paragraphs(self, amount: int, max_len=256) -> list[str]:
         """
         Generates a paragraph (excluding the newline).
+        :param amount: The amount of paragraphs to generate
         :param max_len: The maximum length of the paragraph in tokens.
         """
+        states = [SimpleNamespace(seq=copy(self.sequence),
+                                  logits=copy(self.last_logits),
+                                  tokens=[],
+                                  sampler=copy(self.sampler))
+                  for _ in range(amount)]
+
         for _ in range(max_len):
-            new_token = self.sampler.sample(self.last_logits)
-            yield self.model.detokenize(new_token)
-            if new_token in (self.model.token_newline, self.model.token_eos):
-                return
-            self.last_logits = self.sequence.insert(new_token)
+            for state in states:
+                if not state.tokens or state.tokens[-1] != "\n":
+                    new_tok = state.sampler.sample(state.logits)
+                    if new_tok in (self.model.token_eos, self.model.token_newline):
+                        state.tokens.append("\n")
+                    else:
+                        state.tokens.append(self.model.detokenize(new_tok))
+                        state.logits = state.seq.insert(new_tok)
             self.context.process()
+        for s in states:
+            s.seq.clear()
+        return ["".join(s.tokens).strip() for s in states]
 
     def clear(self):
         self.sequence.clear()
@@ -112,16 +129,9 @@ class WriterShell(cmd.Cmd):
         num = parse_num(arg)
         if not num:
             return
-        for _ in range(num):
-            print(f"{len(self.current_options) + 1}. {prefix}", end="")
-            par = prefix
-            print(prefix, end="")
-            with story.rollback():
-                for piece in story.write_paragraph():
-                    print(piece, end="")
-                    par += piece
-            self.current_options.append(par)
-            print()
+        for option in story.generate_paragraphs(num):
+            print(f"{len(self.current_options) + 1}. {prefix}{option}")
+            self.current_options.append(option)
 
     def do_extend(self, arg: str):
         'extend [num] text: extend given text, generating num possible paragraphs.'

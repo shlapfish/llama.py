@@ -38,7 +38,9 @@ class TokenDataArray:
     def __copy__(self):
         new = TokenDataArray.__new__(type(self))
         new.token_data = self.token_data.copy()
-        new.ltdas = ffi.new("struct llama_token_data_array *", self.ltdas)
+        new.ltdas = ffi.new("struct llama_token_data_array *")
+        ffi.memmove(new.ltdas, self.ltdas, ffi.sizeof("struct llama_token_data_array"))
+        new.ltdas.data = ffi.from_buffer("llama_token_data *", new.token_data.data)
         return new
 
 
@@ -63,7 +65,7 @@ class Mirostatv2Sampler:
         ret.context = self.context
         ret.target_entropy = self.target_entropy
         ret.update_speed = self.update_speed
-        ret.mu = ffi.new("float *", self.mu)
+        ret.mu = ffi.new("float *", self.mu[0])
         ret.tda = copy(self.tda)
         return ret
 
