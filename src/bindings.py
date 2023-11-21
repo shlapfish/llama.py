@@ -23,15 +23,23 @@ def load_libllama(path: str):
     """Cleans up llama.h and then uses it to generate bindings."""
     path = pathlib.Path(path).absolute()
     h_file = (path / "llama.h").read_text()
+    h_file += "\n" + (path / "ggml.h").read_text()
+
+    h_file = h_file.replace("sizeof(int32_t)", "4")
 
     to_remove = [
+        re.compile(r"\\\n", re.MULTILINE),
+        re.compile(r'#ifdef +__cplusplus\nextern "C" \{\n#endif'),
+        re.compile(r"#ifdef +__cplusplus\n}\n#endif"),
+        re.compile(r"#(?!define [A-Z_]+ +[-0-9]+).*"),
+        re.compile(r"typedef (half|__fp16) ggml_fp16_t;"),
         re.compile(r"\n[^\n]*LLAMA_API DEPRECATED[^;]*;"),
+        re.compile(r"GGML_DEPRECATED[^;]*;"),
         re.compile(r"\n[^\n]*llama_internal_get_tensor_map[^;]*;"),
-        re.compile(r'#ifdef __cplusplus\nextern "C" \{\n#endif'),
-        re.compile(r"#ifdef __cplusplus\n}\n#endif"),
         re.compile(r"\n[^\n]*ggml_log_callback[^;]*;"),
-        re.compile(r"LLAMA_API"),
-        re.compile(r"^#[^\n]*\n", re.MULTILINE),
+        re.compile(r"(LLAMA|GGML)_API"),
+        re.compile(r"GGML_ATTRIBUTE_FORMAT.*"),
+        re.compile(r"GGML_RESTRICT"),
     ]
     for p in to_remove:
         h_file = p.sub("", h_file)
