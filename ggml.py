@@ -1,4 +1,6 @@
 from enum import IntEnum
+from functools import cached_property
+from typing import Optional
 
 from llama import lib, ffi, load_libllama
 from src.bindings import c_str
@@ -23,11 +25,15 @@ class Type(IntEnum):
 
 
 class Context:
-    def __init__(self, mem_size: int):
+    def __init__(self, raw_ptr):
+        self._raw = raw_ptr
+
+    @staticmethod
+    def new(mem_size: int):
         params = ffi.new("struct ggml_init_params *")
         params.mem_size = mem_size
         params.mem_buffer = ffi.NULL
-        self._raw = lib.ggml_init(params[0])
+        return Context(lib.ggml_init(params[0]))
 
     def new_tensor(self, size: list[int], type: Type, name: str = None, is_param: bool = False):
         size_arr = ffi.new("int64_t []", size)
@@ -70,6 +76,12 @@ class Tensor:
     def type(self) -> Type:
         return Type(self._raw.type)
 
+    @property
+    def grad(self) -> Optional['Tensor']:
+        t = self._raw.grad
+        if t:
+            return Tensor(self.ctx, t)
+
     def set_param(self):
         lib.ggml_set_param(self.ctx._raw, self._raw)
 
@@ -81,12 +93,15 @@ class Tensor:
 
     def set(self, val) -> 'Tensor':
         match val:
-            case float(f): raw = lib.ggml_set_f32(self._raw, f)
-            case int(i): raw = lib.ggml_set_i32(self._raw, i)
-            case _: raise Exception("Dunno what to do with that type yet. Pls implement.")
+            case float(f):
+                raw = lib.ggml_set_f32(self._raw, f)
+            case int(i):
+                raw = lib.ggml_set_i32(self._raw, i)
+            case _:
+                raise Exception("Dunno what to do with that type yet. Pls implement.")
         return Tensor(self.ctx, raw)
 
-    def __getitem__(self, item: int | tuple[int, ...]):
+    def __getitem__(self, item: int | tuple[int, ...]) -> float | int:
         # TODO check the order of the indices, I might've gotten them wrong
         if not isinstance(item, tuple):
             item = (item,)
@@ -114,27 +129,41 @@ class Graph:
     def print(self):
         lib.ggml_graph_print(self._raw)
 
+    def __len__(self):
+        return self._raw.size
 
-MiB = 1024*1024
-with Context(16*MiB) as ctx:
+
+MiB = 1024 * 1024
+with Context.new(16 * MiB) as ctx:
+    scratch = ffi.new("struct ggml_scratch *")
+    scratch.offs = 0
+    scratch.size = 0
+    scratch.data = ffi.NULL
+    lib.ggml_set_scratch(ctx._raw, scratch[0])
+
     x = ctx.new_tensor([1], Type.F32, "x", is_param=True)
     a = ctx.new_tensor([1], Type.F32, "a")
     b = ctx.new_tensor([1], Type.F32, "b")
 
-    f = a * x*x + b
+    f = a * x * x + b
 
-    graph = ctx.new_graph()
-    graph.build_forward_expand(f)
+    forward = ctx.new_graph()
+    forward.build_forward_expand(f)
 
     # set the input variable and parameter values
     x.set(2.)
     a.set(3.)
     b.set(4.)
 
-    graph.compute()
+    forward.compute()
+    print(f"x' = {x.grad[0]}")
+    assert f[0] == 16.
 
-    result = f[0]
+    backward = ctx.new_graph()
 
-    graph.print()
+    lib.ggml_graph_cpy(forward._raw, backward._raw)
+    lib.ggml_build_backward_expand(ctx._raw, forward._raw, backward._raw, False)
+    backward.compute()
 
-print(result)
+    forward.print()
+    backward.print()
