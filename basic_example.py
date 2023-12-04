@@ -1,11 +1,11 @@
 from src.bindings import free_backend
-from llama import Model, Context, Sequence, load_libllama, initialize_backend
+from llama import Model, Context, Sequence
+from bindings import load_libllama
 from src.sampling import Mirostatv2Sampler
 
 load_libllama("../llama.cpp")
 
 
-initialize_backend(numa=False)
 model = Model(path="models/nous-hermes-llama2-13b.Q4_0.gguf", n_gpu_layers=0)
 
 context = Context(model, n_ctx=512, n_batch=16)
