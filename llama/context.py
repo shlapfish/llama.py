@@ -5,8 +5,8 @@ from typing import Any, ClassVar, Iterable
 
 import numpy as np
 
-from src.bindings import lib, ffi, copy_array, UseAfterFree
-from src.model import Model
+from bindings import lib, ffi, copy_array, UseAfterFree
+from llama.model import Model
 
 
 @dataclass(slots=True)

@@ -1,23 +1,20 @@
 import cmd
-from collections import namedtuple
 from contextlib import contextmanager
 from copy import copy
 from types import SimpleNamespace
-from typing import Iterator
 
-from llama import Model, Context, Mirostatv2Sampler, initialize_backend
-from src.bindings import load_libllama
-from src.context import Sequence
+from llama import Model, Context, Mirostatv2Sampler
+from bindings import load_libllama, lib
+from llama.context import Sequence
 
 load_libllama("../llama.cpp")
-initialize_backend(numa=False)
 
 
 class Story:
     def __init__(self):
-        self.model = Model("models/Nous-Hermes-13B.Q5_K_M.gguf", n_gpu_layers=1000)
-        self.context = Context(self.model, context_size=10000, )
-        self.sampler = Mirostatv2Sampler(self.context)
+        self.model = Model("models/nous-hermes-llama2-13b.Q5_K_M.gguf", n_gpu_layers=1000)
+        self.context = Context(self.model, context_size=10000, rope_scaling_type=lib.LLAMA_ROPE_SCALING_YARN, rope_freq_scale=1.)
+        self.sampler = Mirostatv2Sampler(self.context, target_entropy=2.)
         self.sequence = Sequence(self.context)
         self.last_logits = self.sequence.insert(self.model.token_bos)
         self.clear()
@@ -37,12 +34,15 @@ class Story:
         else:
             self.clear()
 
-    def generate_paragraphs(self, amount: int, max_len=256) -> list[str]:
+    def generate_paragraphs(self, amount: int, max_len=512) -> list[str]:
         """
         Generates a paragraph (excluding the newline).
         :param amount: The amount of paragraphs to generate
         :param max_len: The maximum length of the paragraph in tokens.
         """
+        batch_n = self.context.max_batch_size
+        if amount > batch_n:
+            return self.generate_paragraphs(batch_n) + self.generate_paragraphs(amount - batch_n)
         states = [SimpleNamespace(seq=copy(self.sequence),
                                   logits=copy(self.last_logits),
                                   tokens=[],
@@ -130,7 +130,7 @@ class WriterShell(cmd.Cmd):
         if not num:
             return
         for option in story.generate_paragraphs(num):
-            print(f"{len(self.current_options) + 1}. {prefix}{option}")
+            print(f"{len(self.current_options) + 1}. {prefix}{option}\n")
             self.current_options.append(option)
 
     def do_extend(self, arg: str):

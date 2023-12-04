@@ -1,6 +1,6 @@
 from typing import Iterable
 
-from src.bindings import c_str, lib, ffi, UseAfterFree
+from bindings import c_str, lib, ffi, UseAfterFree
 
 
 class Model:
@@ -9,7 +9,7 @@ class Model:
     - gpu_layers: `int` --- Number of layers to offload to the GPU. They will be stored in VRAM only.
     - main_gpu: `int` --- Index of the GPU to use for scratch and small tensors. Get a list from #todo
     - vocab_only: `bool` --- Only load the vocabulary, no weights.
-    - use_mmap: `bool` --- Only load the vocabulary, no weights.
+    - use_mmap: `bool` --- Use memory mapping to load the model.
     - use_mlock: `bool` --- Force system to keep model in RAM.
     """
     def __init__(self, path: str, **kwargs):

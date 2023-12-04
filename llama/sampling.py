@@ -1,12 +1,13 @@
 from collections import defaultdict
 from copy import copy
-from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
-from src.bindings import lib, ffi
-from src.model import Model
-from src.context import Context, Logits
+
+from bindings import lib, ffi
+from llama.context import Context, Logits
+from llama.model import Model
 
 TokenData = np.dtype([('token', 'i4'), ('logit', 'f4'), ('p', 'f4')])
 
