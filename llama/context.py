@@ -37,6 +37,7 @@ class Context:
     - batch_size: `int` --- Prompt processing maximum batch size.
     - threads: `int` --- Number of threads to used.
     - embedding: `bool` --- Embedding mode only.
+    - max_n_sequences: `int` --- M
     """
     def __init__(self, model: Model, context_size=None, threads=None, batch_size=None, **kwargs):
         self.planned_inserts: list[Insert] = []
@@ -62,8 +63,8 @@ class Context:
         """Process all the pending insert jobs."""
         while self.planned_inserts:
             inserts = self.planned_inserts[:self.max_batch_size]
-            n_seq_max = 1
-            batch = lib.llama_batch_init(len(inserts), 0, n_seq_max)
+            max_seq_id = max(i.seq_id for i in inserts)
+            batch = lib.llama_batch_init(len(inserts), 0, max_seq_id)
             batch.n_tokens = len(inserts)
             n_vocab = self.model.vocab_size
             for i, insert in enumerate(inserts):
@@ -107,7 +108,7 @@ class Context:
             pass
 
 
-@dataclass
+@dataclass(slots=True)
 class Sequence:
     context: Context
     seq_id: int = field(hash=True)
@@ -121,6 +122,7 @@ class Sequence:
         self.seq_id = next(i for i in count() if i not in self.used_ids)
         self.used_ids.add(self.seq_id)
         self.tokens = []
+        self.original_length = 0
 
     def truncate_begin(self, amount: int):
         """Removes the first `amount` tokens from the sequence."""
@@ -131,10 +133,10 @@ class Sequence:
 
     def truncate_end(self, amount: int):
         """Remove the last `amount` tokens from the sequence."""
-        l = len(self.tokens)
-        assert amount <= l - self.original_length, f"Can truncate at most {l - self.original_length}."
-        lib.llama_kv_cache_seq_rm(self.context._raw, self.seq_id, l - amount, -1)
-        self.tokens = self.tokens[:l - amount]
+        # l = len(self.tokens)
+        # assert amount <= l - self.original_length, f"Can truncate at most {l - self.original_length}."
+        lib.llama_kv_cache_seq_rm(self.context._raw, self.seq_id, len(self.tokens) - amount, -1)
+        self.tokens = self.tokens[:-amount]
 
     def duplicate(self) -> 'Sequence':
         """Duplicates a sequence and returns the new id. This doesn't use additional memory."""
@@ -146,8 +148,10 @@ class Sequence:
 
     def clear(self):
         """Removes tokens that were inserted. It does not remove tokens copied from the original sequence."""
-        self.truncate_end(len(self.tokens) - self.original_length)
-        self.tokens = self.tokens[:self.original_length]
+        self.truncate_end(len(self.tokens))
+        self.tokens.clear()
+        # self.truncate_end(len(self.tokens) - self.original_length)
+        # self.tokens = self.tokens[:self.original_length]
 
     def insert(self, text_or_tokens: str | int | Iterable[int], generate_logits: bool = True) -> Logits | None:
         """
